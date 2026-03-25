@@ -1,0 +1,68 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local secrets and keystores
+.keystore/
+client-data/
+
+# Local relay/runtime artifacts
+relay.sqlite3
+relay-blobs/
+relay-cert.pem
+relay-key.pem
+.relay-quic/
+
+# Demo artifacts
+demo-relay.sqlite3
+demo-relay-blobs/
+demo-blobs/
+.demo-quic/
+
+# UI artifacts
+ui-relay.sqlite3
+ui-relay-blobs/
+ui-blobs/
+.ui-quic/
+received/
+
+# Test artifacts
+test-relay.sqlite3
+test-relay-blobs/
+test-blobs/
+test-keystore/
+
+# Logs and local dumps
+*.log
+*.tmp
+*.bak

@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package aegis;
+
+enum RelayOperation {
+  RELAY_OPERATION_UNSPECIFIED = 0;
+  RELAY_OPERATION_GET_PUBKEY = 1;
+  RELAY_OPERATION_PUT_BUNDLE = 2;
+  RELAY_OPERATION_GET_BUNDLE = 3;
+  RELAY_OPERATION_ENQUEUE = 4;
+  RELAY_OPERATION_DEQUEUE = 5;
+  RELAY_OPERATION_UPLOAD_BLOB = 6;
+  RELAY_OPERATION_DOWNLOAD_BLOB = 7;
+}
+
+message OneTimePreKey {
+  uint32 key_id = 1;
+  bytes kem_public_key = 2;
+  bytes dh_public_key = 3;
+  bytes signature = 4;
+}
+
+message PreKeyBundle {
+  string user_id = 1;
+  bytes sig_public_key = 2;
+  bytes kem_public_key = 3;
+  bytes dh_public_key = 4;
+  bytes bundle_signature = 5;
+  repeated OneTimePreKey one_time_prekeys = 6;
+}
+
+message PublishBundleRequest {
+  PreKeyBundle bundle = 1;
+}
+
+message GetBundleRequest {
+  string user_id = 1;
+}
+
+message GetBundleResponse {
+  PreKeyBundle bundle = 1;
+}
+
+message EnqueueRequest {
+  bytes envelope = 1;
+}
+
+message SealedEnvelope {
+  bytes nonce = 1;
+  bytes ciphertext = 2;
+  bytes ephemeral_pub = 3;
+}
+
+message RelayInnerPayload {
+  string sender_id = 1;
+  string recipient_id = 2;
+  bytes payload = 3;
+}
+
+message DequeueRequest {
+  string recipient_id = 1;
+  uint32 limit = 2;
+}
+
+message DequeueResponse {
+  repeated bytes payloads = 1;
+}
+
+message RelayRequest {
+  RelayOperation op = 1;
+  bytes auth_token = 2;
+  oneof payload {
+    PublishBundleRequest put_bundle = 10;
+    GetBundleRequest get_bundle = 11;
+    EnqueueRequest enqueue = 12;
+    DequeueRequest dequeue = 13;
+    BlobUploadRequest upload_blob = 14;
+    BlobDownloadRequest download_blob = 15;
+  }
+}
+
+message RelayResponse {
+  bool ok = 1;
+  string error = 2;
+  oneof payload {
+    bytes relay_public_key = 10;
+    GetBundleResponse bundle = 11;
+    DequeueResponse dequeue = 12;
+    BlobUploadResponse upload_blob = 13;
+    BlobDownloadResponse download_blob = 14;
+  }
+}
+
+message BlobUploadRequest {
+  string blob_id = 1;
+  bytes ciphertext = 2;
+}
+
+message BlobUploadResponse {
+  bool stored = 1;
+}
+
+message BlobDownloadRequest {
+  string blob_id = 1;
+}
+
+message BlobDownloadResponse {
+  bytes ciphertext = 1;
+}
+
+message PacketHeader {
+  string session_id = 1;
+  uint32 msg_index = 2;
+  bytes ratchet_pub = 3;
+  uint64 timestamp = 4;
+}
+
+message RatchetPacket {
+  PacketHeader header = 1;
+  bytes nonce = 2;
+  bytes ciphertext = 3;
+  bytes signature = 4;
+  string sender_id = 5;
+}
+
+message HandshakeInit {
+  string sender_id = 1;
+  bytes sender_sig_public_key = 2;
+  bytes sender_ephemeral_dh_public_key = 3;
+  bytes kem_ciphertext = 4;
+  bytes sender_signature = 5;
+  uint32 one_time_prekey_id = 6;
+}
+
+message FilePointer {
+  string blob_id = 1;
+  bytes file_hash = 2;
+  bytes encrypted_key = 3;
+  bytes nonce = 4;
+  uint64 size = 5;
+  string filename = 6;
+}
+
+message AppMessage {
+  oneof kind {
+    HandshakeInit handshake = 1;
+    RatchetPacket ratchet_packet = 2;
+  }
+}
