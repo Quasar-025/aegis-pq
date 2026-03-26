@@ -58,9 +58,10 @@ class AegisClient:
             sig_name=config.crypto.sig_name,
             use_oqs=config.crypto.use_oqs,
         )
+        self.identity_reset_reason = ""
 
         loaded = self.keystore.load_identity(user_id)
-        if loaded:
+        if loaded and self._loaded_identity_compatible(loaded):
             self.identity = UserIdentity(
                 user_id=user_id,
                 sig_public_key=bytes.fromhex(loaded["sig_public_key"]),
@@ -83,22 +84,9 @@ class AegisClient:
             }
             self._next_otpk_id = loaded.get("next_otpk_id", 1)
         else:
-            sig = self.crypto.generate_signature_keypair()
-            kem = self.crypto.generate_kem_keypair()
-            dh = generate_x25519_keypair()
-            self.identity = UserIdentity(
-                user_id=user_id,
-                sig_public_key=sig.public_key,
-                sig_private_key=sig.private_key,
-                kem_public_key=kem.public_key,
-                kem_private_key=kem.private_key,
-                dh_public_key=dh.public_bytes(),
-                dh_private_key=dh.private_bytes(),
-            )
-            self.one_time_prekeys = {}
-            self._next_otpk_id = 1
-            self._generate_one_time_prekeys(target_count=32)
-            self._persist_identity()
+            if loaded:
+                self.identity_reset_reason = "keystore-incompatible-with-current-pq-mode"
+            self._init_new_identity(user_id)
 
         self.server_public_key: bytes | None = None
         self.handshake = PQX3DH(self.crypto)
@@ -106,6 +94,34 @@ class AegisClient:
         self.sessions: dict[str, RatchetState] = {}
         self.peer_sig_keys: dict[str, bytes] = {}
         self.handshake_audit: dict[str, dict] = {}
+
+    def _loaded_identity_compatible(self, loaded: dict) -> bool:
+        stored_pq = loaded.get("pq_enabled")
+        stored_sig_alg = loaded.get("sig_alg")
+        stored_kem_alg = loaded.get("kem_alg")
+        if stored_pq is None or stored_sig_alg is None or stored_kem_alg is None:
+            return False
+        expected_sig = self.crypto.sig_name if self.crypto.use_oqs else "Ed25519"
+        expected_kem = self.crypto.kem_name if self.crypto.use_oqs else "X25519"
+        return bool(stored_pq) == bool(self.crypto.use_oqs) and stored_sig_alg == expected_sig and stored_kem_alg == expected_kem
+
+    def _init_new_identity(self, user_id: str):
+        sig = self.crypto.generate_signature_keypair()
+        kem = self.crypto.generate_kem_keypair()
+        dh = generate_x25519_keypair()
+        self.identity = UserIdentity(
+            user_id=user_id,
+            sig_public_key=sig.public_key,
+            sig_private_key=sig.private_key,
+            kem_public_key=kem.public_key,
+            kem_private_key=kem.private_key,
+            dh_public_key=dh.public_bytes(),
+            dh_private_key=dh.private_bytes(),
+        )
+        self.one_time_prekeys = {}
+        self._next_otpk_id = 1
+        self._generate_one_time_prekeys(target_count=32)
+        self._persist_identity()
 
     def crypto_profile(self) -> dict:
         diag = self.crypto.diagnostics()
@@ -118,6 +134,7 @@ class AegisClient:
             "oqs_reason": diag["oqs_reason"],
             "oqs_module_name": diag["oqs_module_name"],
             "oqs_module_file": diag["oqs_module_file"],
+            "identity_reset_reason": self.identity_reset_reason,
         }
 
     def _persist_identity(self):
@@ -130,6 +147,9 @@ class AegisClient:
                 "kem_private_key": self.identity.kem_private_key.hex(),
                 "dh_public_key": self.identity.dh_public_key.hex(),
                 "dh_private_key": self.identity.dh_private_key.hex(),
+                "pq_enabled": bool(self.crypto.use_oqs),
+                "sig_alg": self.crypto.sig_name if self.crypto.use_oqs else "Ed25519",
+                "kem_alg": self.crypto.kem_name if self.crypto.use_oqs else "X25519",
                 "next_otpk_id": self._next_otpk_id,
                 "one_time_prekeys": {
                     str(k): {

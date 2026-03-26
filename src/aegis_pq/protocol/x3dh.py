@@ -21,7 +21,9 @@ class PQX3DH:
     def verify_bundle(self, bundle: PreKeyBundle) -> None:
         signed = bundle.user_id.encode() + bundle.kem_public_key + bundle.dh_public_key
         if not self.crypto.verify(bundle.sig_public_key, signed, bundle.bundle_signature):
-            raise SignatureVerificationError("invalid pre-key bundle signature")
+            raise SignatureVerificationError(
+                "invalid pre-key bundle signature (likely stale peer bundle or PQ/classical identity mismatch)"
+            )
         if bundle.one_time_prekey:
             otpk = bundle.one_time_prekey
             otpk_signed = bundle.user_id.encode() + otpk.key_id.to_bytes(4, "big") + otpk.kem_public_key + otpk.dh_public_key

@@ -212,6 +212,8 @@ class ClientApp(ctk.CTk):
         )
         if profile.get("oqs_module_file"):
             self._append_threadsafe(f"[security] oqs_module_file={profile['oqs_module_file']}")
+        if profile.get("identity_reset_reason"):
+            self._append_threadsafe(f"[security] identity reset: {profile['identity_reset_reason']}")
         if self.peer_id:
             try:
                 await asyncio.wait_for(self.client.initiate_session(self.peer_id), timeout=12)
