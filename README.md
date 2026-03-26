@@ -1,151 +1,252 @@
 # Aegis-PQ: Hybrid Post-Quantum Secure Communication Suite
 
-Aegis-PQ is an applied cryptography project that implements:
-- Hybrid PQ-X3DH key establishment (Kyber-1024 + X25519)
-- Quantum-safe authentication (Dilithium-5 signatures)
-- Post-quantum double ratchet for forward secrecy and break-in recovery
-- Asynchronous store-and-forward relay with sealed sender metadata protection
-- Secure text and file transfer channels with traffic padding
-- Protobuf binary wire protocol for relay and client message exchange
-- Full QUIC transport path for authenticated multiplexed request/response channels
-- One-time pre-key lifecycle with depletion detection and automatic replenishment
-- Secure local key persistence (Windows DPAPI with fallback encrypted keystore)
+Aegis-PQ is a store-and-forward secure messaging system focused on:
+- Post-quantum confidentiality (Kyber / ML-KEM)
+- Post-quantum authenticity (Dilithium / ML-DSA)
+- Forward secrecy and break-in recovery (double ratchet)
+- Metadata minimization (sealed sender)
 
-## Features
+This README describes the real project architecture, where each part lives, and how the system works end-to-end.
 
-- End-to-end encrypted packet format: `[Header | Ciphertext | Signature]`
-- ISO/IEC 7816-4 padding to fixed 4KB blocks
-- Sealed sender envelope where routing metadata is encrypted for relay-only access
-- File plane with detached encrypted blob channel + ratchet-delivered key material
-- SQLite-backed relay mailbox, long-term pre-key bundle, and one-time pre-key store
-- Relay auth token requirement across TCP and QUIC operations
-- Binary protobuf envelopes replacing JSON wrappers across relay and app payloads
-- CustomTkinter desktop UI for two-party live demonstration (text + files + polling)
+## Project Layout
 
-## Security Notes
+Top-level:
+- `proto/aegis.proto`: canonical wire schema for relay RPC and app payloads
+- `src/aegis_pq`: all runtime code
+- `tests`: protocol and end-to-end tests
+- `requirements.txt`: base runtime dependencies
+- `requirements-pq.txt`: optional PQ-native dependency path (liboqs-python)
 
-- Preferred cryptography path uses `liboqs-python` for Kyber-1024 and Dilithium-5.
-- If OQS is unavailable in the local runtime, the code falls back to classical primitives for development-only operation.
-- Do not use fallback mode in production security deployments.
-- The included relay certificate bootstrap is self-signed for local demos. Replace with managed certificates for deployment.
+Core package map:
+- `src/aegis_pq/crypto`
+	- `pq.py`: PQ provider wrapper (OQS detection, sign/verify, KEM encap/decap, alias handling)
+	- `classical.py`: fallback classical primitives (Ed25519/X25519)
+	- `symmetric.py`: HKDF, HMAC ratchet KDF, AES-GCM helpers
+- `src/aegis_pq/protocol`
+	- `x3dh.py`: authenticated hybrid handshake logic
+	- `ratchet.py`: root/sending/receiving chain logic
+	- `sealed_sender.py`: relay-visible routing only, inner payload secrecy
+	- `packet_codec.py`: protobuf packet encode/decode
+	- `padding.py`: ISO/IEC 7816-4 padding helpers
+	- `types.py`: protocol dataclasses
+- `src/aegis_pq/network`
+	- `relay_server.py`: relay control plane, mailbox API, pre-key and blob endpoints
+	- `relay_client.py`: transport-neutral relay client with QUIC and TCP
+	- `quic_transport.py`: aioquic stream request/response transport and cert bootstrap
+- `src/aegis_pq/storage`
+	- `relay_db.py`: SQLite for bundles, one-time prekeys, mailbox
+	- `relay_blob_store.py`: relay blob persistence
+	- `blob_store.py`: client blob encryption/decryption helpers
+	- `keystore.py`: local key protection (DPAPI on Windows, encrypted fallback)
+- `src/aegis_pq/ui`
+	- `client_app.py`: real multi-device client UI
+	- `app.py`: local two-user demo UI (single machine)
+- `src/aegis_pq/engine.py`: client protocol orchestration (bootstrap, publish, handshake, send/poll)
+- `src/aegis_pq/demo.py`: scripted smoke demo
 
-## Kyber Usage Indication
+## End-to-End Architecture
 
-Runtime indication is now explicit in the client UI and engine profile.
+Logical planes:
+1. Control Plane (Relay RPC): protobuf requests over QUIC or TCP.
+2. Signal Plane (Messages): ratcheted encrypted packets delivered via mailbox.
+3. Data Plane (Files): encrypted blob upload/download through relay blob channel.
 
-- Client UI prints a security line on connect:
-	- `KEM runtime=Kyber1024` when liboqs Kyber is active
-	- `KEM runtime=fallback-classical-kem` when Kyber is not available
-- Programmatic check is available through `AegisClient.crypto_profile()`.
-- Handshake audit metadata is stored per peer in `AegisClient.handshake_audit`.
+Actors:
+1. Client A (alice)
+2. Client B (bob)
+3. Relay (store-and-forward, zero-content visibility)
 
-## PQ Enablement (Important)
+Flow summary:
+1. Each client boots identity and one-time prekeys, then publishes pre-key bundle.
+2. Initiator fetches peer bundle, verifies signature, runs hybrid handshake.
+3. Initiator sends sealed handshake message through relay.
+4. Responder processes handshake, derives same master secret, starts ratchet state.
+5. Text/file key metadata is sent as ratcheted packets.
+6. Files are encrypted client-side and uploaded as blobs; file key + hash travels in ratchet message.
 
-Do not install the unrelated package named `oqs` from PyPI (Open Quick Script).
-This project requires Open Quantum Safe bindings via `liboqs-python`.
+## Cryptographic Functionality
 
-In `venv`, run:
+### 1) Hybrid Handshake (PQ-X3DH style)
 
-```powershell
-python -m pip uninstall -y oqs
-python -m pip install -U liboqs-python
-python -c "import oqs; print(hasattr(oqs, 'KeyEncapsulation'), hasattr(oqs, 'Signature'))"
-```
+Implemented in `src/aegis_pq/protocol/x3dh.py`.
 
-Expected output:
+Inputs:
+- Long-term identity signature key
+- Long-term KEM and DH prekeys
+- Optional one-time prekey
 
-```text
-True True
-```
+Derived master secret:
+- `HKDF( KEM_ss || DH_ss || optional_OTPK_DH_ss )`
 
-If output is not `True True`, the native `liboqs` shared library is not available on your machine.
-Install native `liboqs` first, then reinstall `liboqs-python`.
+Security properties:
+- Peer bundle authenticity (signature checked)
+- Resistance against pre-key tampering
+- Asynchronous session establishment for offline recipients
 
-## Quick Start
+### 2) Double Ratchet
 
+Implemented in `src/aegis_pq/protocol/ratchet.py`.
+
+Properties:
+- Per-message symmetric key evolution
+- Authenticated encryption with AES-GCM
+- Forward secrecy and post-compromise recovery behavior (state advancing per message)
+
+### 3) Sealed Sender
+
+Implemented in `src/aegis_pq/protocol/sealed_sender.py`.
+
+Behavior:
+- Outer envelope encrypted to relay key
+- Relay can read route target only after unseal
+- Sender identity and app payload remain protected from passive relay visibility
+
+### 4) File Channel
+
+Implemented across `src/aegis_pq/storage/blob_store.py`, `src/aegis_pq/storage/relay_blob_store.py`, and `src/aegis_pq/engine.py`.
+
+Behavior:
+- Client generates random file key
+- Encrypts file locally
+- Uploads ciphertext blob
+- Sends `FilePointer` metadata (blob id/hash/key/nonce) via ratchet message
+
+## Key Lifecycle and Persistence
+
+Implemented in `src/aegis_pq/engine.py` and `src/aegis_pq/storage/keystore.py`.
+
+Behavior:
+- One-time prekeys are generated, signed, and published
+- Relay consumes one-time prekeys atomically on fetch
+- Client replenishes low prekey stock
+- Local identity is persisted securely
+- Compatibility checks rotate identity when stored key mode conflicts with current PQ mode
+
+## Transport and Protocol Encoding
+
+Encoding:
+- All control and app messages use protobuf from `proto/aegis.proto`.
+
+Transport:
+- Primary: QUIC (`src/aegis_pq/network/quic_transport.py`)
+- Fallback: TCP framed protobuf (`src/aegis_pq/network/relay_client.py` and `relay_server.py`)
+
+Relay auth:
+- Every relay request includes `auth_token`.
+
+## Setup (Corrected and Reliable)
+
+### A) Base setup (always)
+
+Windows PowerShell:
 ```powershell
 cd aegis-pq
 python -m venv venv
 .\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
+```
+
+macOS/Linux:
+```bash
+cd aegis-pq
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+### B) Optional PQ-native setup (required for true PQ demo)
+
+Important:
+- Do not install the unrelated `oqs` package from PyPI (Open Quick Script).
+- Use OQS bindings path from `requirements-pq.txt`.
+
+Commands:
+```powershell
+python -m pip uninstall -y oqs
+pip install -r requirements-pq.txt
+python -c "import oqs; print(hasattr(oqs, 'KeyEncapsulation'), hasattr(oqs, 'Signature'))"
+```
+
+Expected verification output:
+```text
+True True
+```
+
+If not `True True`, native liboqs setup did not complete on that machine.
+
+## Running Modes
+
+### 1) Smoke demo (single machine script)
+```powershell
 python -m aegis_pq.demo
 ```
 
-## Demonstration Flow
-
-```powershell
-# 1) Start standalone relay (TCP + QUIC)
-python -m aegis_pq.network.relay_server
-
-# 2) In another terminal, launch UI demo
-python -m aegis_pq.ui.app
-```
-
-Recommended presenter flow in UI:
-1. Send Alice to Bob text.
-2. Send Bob to Alice reply.
-3. Send demo file and poll both sides.
-4. Explain one-time pre-key consumption and replenishment after handshake activity.
-
-## Real Two-Laptop Product Demo
-
-Use one relay host and two independent client apps.
-
-Laptop A (Relay Host):
-
+### 2) Relay server
 ```powershell
 python -m aegis_pq.network.relay_server --host 0.0.0.0 --port 8888 --quic-port 8889 --auth-token your-demo-token
 ```
 
-Laptop B (User alice):
-
+### 3) Real client UI (recommended for multi-device demo)
+Windows:
 ```powershell
 python -m aegis_pq.ui.client_app
 ```
 
-On macOS, use:
-
+macOS/Linux:
 ```bash
 python3 -m aegis_pq.ui.client_app
 ```
 
-Laptop C (User bob):
+## UI Field Guide (What to Put Where)
 
-```powershell
-python -m aegis_pq.ui.client_app
-```
+In `client_app` top row:
+1. `user_id`: current laptop identity (`alice` or `bob`)
+2. `peer_id`: opposite user (`bob` if alice, `alice` if bob)
+3. `relay_host`: relay machine IP
+4. `quic`: relay QUIC port (default `8889`)
+5. `tcp`: relay TCP port (default `8888`)
+6. `auth_token`: exactly the same token relay started with
+7. `transport`: `quic` preferred; app can fall back to TCP path
 
-In each client app set:
-1. `relay_host` to Laptop A IP address.
-2. `auth_token` to the same token used on relay.
-3. user IDs as `alice` and `bob` respectively.
-4. transport to `quic`.
+## Real Two-Laptop Demo Procedure
 
-If QUIC UDP is blocked on your network, the client automatically falls back to TCP and logs the transition.
+1. Start relay on host laptop.
+2. Start bob client, connect and wait for `[system] connected`.
+3. Start alice client, connect and wait for session initiation.
+4. Exchange text messages.
+5. Send a file from one side and poll receive event on the other side.
 
-This is the recommended real demo path for separate devices.
+If session does not establish:
+1. Stop all processes.
+2. Delete relay state: `relay.sqlite3`, `relay-blobs/`.
+3. Delete client keystores: `client-data/alice/keystore`, `client-data/bob/keystore`.
+4. Reconnect in order: bob first, alice second.
 
-## UI
+## Runtime Indicators and Diagnostics
 
-```powershell
-python -m aegis_pq.ui.app
-```
+Client logs include:
+1. `KEM runtime=...`
+2. `SIG runtime=...`
+3. `pq_enabled=True/False`
+4. `oqs_reason=...`
+5. `oqs_module_file=...`
 
-Single-user real client mode:
+Programmatic diagnostics:
+- `AegisClient.crypto_profile()`
+- `AegisClient.handshake_audit`
 
-```powershell
-python -m aegis_pq.ui.client_app
-```
-
-## Relay Server
-
-```powershell
-python -m aegis_pq.network.relay_server
-```
-
-## Tests
+## Testing
 
 ```powershell
 pytest -q
 ```
+
+## Known Constraints
+
+1. Relay certificate bootstrap is self-signed for development and demos.
+2. PQ runtime depends on local liboqs availability.
+3. Cross-device demos require both clients to run compatible OQS mechanisms and clean session state.

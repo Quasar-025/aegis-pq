@@ -1,0 +1,4 @@
+# Optional PQ-native dependencies (install after base requirements)
+# This uses upstream Open Quantum Safe bindings and may compile native liboqs.
+# If this fails on your machine, follow README troubleshooting steps.
+git+https://github.com/open-quantum-safe/liboqs-python.git@main
