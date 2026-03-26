@@ -64,7 +64,7 @@ class PQCryptoProvider:
     @staticmethod
     def _sig_aliases(name: str) -> list[str]:
         aliases = {
-            "Dilithium5": ["Dilithium5", "ML-DSA-87"],
+            "Dilithium5": ["ML-DSA-87", "Dilithium5"],
             "ML-DSA-87": ["ML-DSA-87", "Dilithium5"],
         }
         return aliases.get(name, [name])
@@ -73,7 +73,7 @@ class PQCryptoProvider:
     def _kem_aliases(name: str) -> list[str]:
         aliases = {
             "Kyber1024": ["Kyber1024", "ML-KEM-1024"],
-            "ML-KEM-1024": ["ML-KEM-1024", "Kyber1024"],
+            "ML-KEM-1024": ["Kyber1024", "ML-KEM-1024"],
         }
         return aliases.get(name, [name])
 
