@@ -189,6 +189,8 @@ class AegisClient:
             self._generate_one_time_prekeys(32)
         signed = self.user_id.encode() + self.identity.kem_public_key + self.identity.dh_public_key
         bundle_signature = self.crypto.sign(self.identity.sig_private_key, signed)
+        if not self.crypto.verify(self.identity.sig_public_key, signed, bundle_signature):
+            raise RuntimeError("local PQ signature self-check failed during bundle publish")
         bundle = pb.PreKeyBundle(
             user_id=self.user_id,
             sig_public_key=self.identity.sig_public_key,

@@ -100,7 +100,18 @@ class PQCryptoProvider:
     def verify(self, public_key: bytes, message: bytes, signature: bytes) -> bool:
         if self.use_oqs:
             with OQS.Signature(self.sig_name) as sig:
-                return sig.verify(message, signature, public_key)
+                try:
+                    ok = sig.verify(message, signature, public_key)
+                    if ok:
+                        return True
+                except Exception:
+                    ok = False
+
+                # Compatibility path for variant bindings with different argument order.
+                try:
+                    return bool(sig.verify(signature, message, public_key))
+                except Exception:
+                    return bool(ok)
         try:
             pk = ed25519.Ed25519PublicKey.from_public_bytes(public_key)
             pk.verify(signature, message)
