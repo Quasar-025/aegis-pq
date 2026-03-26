@@ -4,6 +4,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from datetime import datetime
 from pathlib import Path
+import time
 from tkinter import filedialog
 
 from aegis_pq.config import DEFAULT_CONFIG
@@ -34,7 +35,10 @@ class ClientApp(ctk.CTk):
         self.connected = False
         self.connecting = False
         self.poll_inflight = False
+        self.initiate_inflight = False
+        self.last_initiate_attempt = 0.0
         self.last_poll_error: str | None = None
+        self.last_initiate_error: str | None = None
         self._append_count = 0
 
         self.header = ctk.CTkLabel(self, text="Aegis-PQ Real Client Mode", font=("Segoe UI", 24, "bold"))
@@ -277,6 +281,28 @@ class ClientApp(ctk.CTk):
     def _start_poll(self):
         if not self.client or not self.connected or self.connecting or self.poll_inflight:
             return
+
+        # Recover automatically when initial handshake failed due stale/missing peer bundle.
+        if self.peer_id and not self.client.has_session(self.peer_id):
+            now = time.time()
+            if (not self.initiate_inflight) and (now - self.last_initiate_attempt > 5.0):
+                self.initiate_inflight = True
+                self.last_initiate_attempt = now
+
+                def _init_ok(_):
+                    self.initiate_inflight = False
+                    self.last_initiate_error = None
+                    self._append(f"[session] initiated with {self.peer_id}")
+
+                def _init_err(exc):
+                    self.initiate_inflight = False
+                    msg = str(exc)
+                    if msg != self.last_initiate_error:
+                        self._append(f"[session] retry pending: {msg}")
+                        self.last_initiate_error = msg
+
+                self._run_async(self.client.initiate_session(self.peer_id), on_success=_init_ok, on_error=_init_err)
+
         self.poll_inflight = True
 
         def _ok(events):

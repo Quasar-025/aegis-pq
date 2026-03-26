@@ -237,7 +237,6 @@ class AegisClient:
             bundle_signature=bundle_pb.bundle_signature,
             one_time_prekey=otpk,
         )
-        self.peer_sig_keys[peer_id] = bundle.sig_public_key
 
         eph = generate_x25519_keypair()
         init, secrets = self.handshake.initiator_handshake(
@@ -253,6 +252,7 @@ class AegisClient:
             master_secret=secrets.master_secret,
             is_initiator=True,
         )
+        self.peer_sig_keys[peer_id] = bundle.sig_public_key
         self.handshake_audit[peer_id] = {
             "role": "initiator",
             "kem_runtime": self.crypto_profile()["kem_runtime"],
@@ -407,3 +407,6 @@ class AegisClient:
 
         await self._maybe_replenish_prekeys()
         return events
+
+    def has_session(self, peer_id: str) -> bool:
+        return peer_id in self.sessions
