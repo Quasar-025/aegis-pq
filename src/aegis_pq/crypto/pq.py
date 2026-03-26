@@ -46,6 +46,10 @@ class PQCryptoProvider:
         has_kem = HAS_OQS and hasattr(OQS, "KeyEncapsulation")
         oqs_ready = HAS_OQS and has_signature and has_kem
 
+        if oqs_ready:
+            self.sig_name = self._resolve_sig_name(self.sig_name)
+            self.kem_name = self._resolve_kem_name(self.kem_name)
+
         if not use_oqs:
             self.oqs_reason = "oqs-disabled-by-config"
         elif not HAS_OQS:
@@ -56,6 +60,56 @@ class PQCryptoProvider:
             self.oqs_reason = "ok"
 
         self.use_oqs = use_oqs and oqs_ready
+
+    @staticmethod
+    def _sig_aliases(name: str) -> list[str]:
+        aliases = {
+            "Dilithium5": ["Dilithium5", "ML-DSA-87"],
+            "ML-DSA-87": ["ML-DSA-87", "Dilithium5"],
+        }
+        return aliases.get(name, [name])
+
+    @staticmethod
+    def _kem_aliases(name: str) -> list[str]:
+        aliases = {
+            "Kyber1024": ["Kyber1024", "ML-KEM-1024"],
+            "ML-KEM-1024": ["ML-KEM-1024", "Kyber1024"],
+        }
+        return aliases.get(name, [name])
+
+    def _enabled_sig_mechanisms(self) -> set[str]:
+        if not (HAS_OQS and OQS is not None and hasattr(OQS, "get_enabled_sig_mechanisms")):
+            return set()
+        try:
+            return set(OQS.get_enabled_sig_mechanisms())
+        except Exception:
+            return set()
+
+    def _enabled_kem_mechanisms(self) -> set[str]:
+        if not (HAS_OQS and OQS is not None and hasattr(OQS, "get_enabled_kem_mechanisms")):
+            return set()
+        try:
+            return set(OQS.get_enabled_kem_mechanisms())
+        except Exception:
+            return set()
+
+    def _resolve_sig_name(self, preferred: str) -> str:
+        enabled = self._enabled_sig_mechanisms()
+        if not enabled:
+            return preferred
+        for candidate in self._sig_aliases(preferred):
+            if candidate in enabled:
+                return candidate
+        return preferred
+
+    def _resolve_kem_name(self, preferred: str) -> str:
+        enabled = self._enabled_kem_mechanisms()
+        if not enabled:
+            return preferred
+        for candidate in self._kem_aliases(preferred):
+            if candidate in enabled:
+                return candidate
+        return preferred
 
     def diagnostics(self) -> dict[str, str | bool]:
         return {
@@ -99,19 +153,26 @@ class PQCryptoProvider:
 
     def verify(self, public_key: bytes, message: bytes, signature: bytes) -> bool:
         if self.use_oqs:
-            with OQS.Signature(self.sig_name) as sig:
+            for alg in self._sig_aliases(self.sig_name):
                 try:
-                    ok = sig.verify(message, signature, public_key)
-                    if ok:
-                        return True
-                except Exception:
-                    ok = False
+                    with OQS.Signature(alg) as sig:
+                        try:
+                            ok = sig.verify(message, signature, public_key)
+                            if ok:
+                                return True
+                        except Exception:
+                            ok = False
 
-                # Compatibility path for variant bindings with different argument order.
-                try:
-                    return bool(sig.verify(signature, message, public_key))
+                        # Compatibility path for variant bindings with different argument order.
+                        try:
+                            if sig.verify(signature, message, public_key):
+                                return True
+                        except Exception:
+                            if ok:
+                                return True
                 except Exception:
-                    return bool(ok)
+                    continue
+            return False
         try:
             pk = ed25519.Ed25519PublicKey.from_public_bytes(public_key)
             pk.verify(signature, message)
