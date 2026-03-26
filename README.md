@@ -39,12 +39,34 @@ Runtime indication is now explicit in the client UI and engine profile.
 - Programmatic check is available through `AegisClient.crypto_profile()`.
 - Handshake audit metadata is stored per peer in `AegisClient.handshake_audit`.
 
+## PQ Enablement (Important)
+
+Do not install the unrelated package named `oqs` from PyPI (Open Quick Script).
+This project requires Open Quantum Safe bindings via `liboqs-python`.
+
+In `venv`, run:
+
+```powershell
+python -m pip uninstall -y oqs
+python -m pip install -U liboqs-python
+python -c "import oqs; print(hasattr(oqs, 'KeyEncapsulation'), hasattr(oqs, 'Signature'))"
+```
+
+Expected output:
+
+```text
+True True
+```
+
+If output is not `True True`, the native `liboqs` shared library is not available on your machine.
+Install native `liboqs` first, then reinstall `liboqs-python`.
+
 ## Quick Start
 
 ```powershell
 cd aegis-pq
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install -e .
 python -m aegis_pq.demo
@@ -82,6 +104,12 @@ Laptop B (User alice):
 python -m aegis_pq.ui.client_app
 ```
 
+On macOS, use:
+
+```bash
+python3 -m aegis_pq.ui.client_app
+```
+
 Laptop C (User bob):
 
 ```powershell
@@ -93,6 +121,8 @@ In each client app set:
 2. `auth_token` to the same token used on relay.
 3. user IDs as `alice` and `bob` respectively.
 4. transport to `quic`.
+
+If QUIC UDP is blocked on your network, the client automatically falls back to TCP and logs the transition.
 
 This is the recommended real demo path for separate devices.
 

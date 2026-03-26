@@ -16,21 +16,25 @@ class RelayClient:
         quic_port: int = 8889,
         auth_token: str = "aegis-demo-auth-token",
         transport: str = "tcp",
+        request_timeout: float = 8.0,
+        quic_fallback_to_tcp: bool = True,
     ):
         self.host = host
         self.port = port
         self.quic_port = quic_port
         self.auth_token = auth_token.encode()
         self.transport = transport
+        self.request_timeout = request_timeout
+        self.quic_fallback_to_tcp = quic_fallback_to_tcp
         self._quic = QuicRelayClient(host, quic_port)
 
     async def _call_tcp(self, req):
-        reader, writer = await asyncio.open_connection(self.host, self.port)
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(self.host, self.port), timeout=self.request_timeout)
         encoded = req.SerializeToString()
         writer.write(len(encoded).to_bytes(4, "big") + encoded)
-        await writer.drain()
-        length = int.from_bytes(await reader.readexactly(4), "big")
-        raw = await reader.readexactly(length)
+        await asyncio.wait_for(writer.drain(), timeout=self.request_timeout)
+        length = int.from_bytes(await asyncio.wait_for(reader.readexactly(4), timeout=self.request_timeout), "big")
+        raw = await asyncio.wait_for(reader.readexactly(length), timeout=self.request_timeout)
         writer.close()
         await writer.wait_closed()
         resp = pb.RelayResponse()
@@ -39,10 +43,15 @@ class RelayClient:
 
     async def _call(self, req):
         if self.transport == "quic":
-            raw = await self._quic.request(req.SerializeToString())
-            resp = pb.RelayResponse()
-            resp.ParseFromString(raw)
-            return resp
+            try:
+                raw = await self._quic.request(req.SerializeToString(), timeout=self.request_timeout)
+                resp = pb.RelayResponse()
+                resp.ParseFromString(raw)
+                return resp
+            except Exception:
+                if not self.quic_fallback_to_tcp:
+                    raise
+                return await self._call_tcp(req)
         return await self._call_tcp(req)
 
     async def get_relay_public_key(self) -> bytes:

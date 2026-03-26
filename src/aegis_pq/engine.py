@@ -108,12 +108,16 @@ class AegisClient:
         self.handshake_audit: dict[str, dict] = {}
 
     def crypto_profile(self) -> dict:
+        diag = self.crypto.diagnostics()
         return {
             "kem": self.crypto.kem_name,
             "signature": self.crypto.sig_name,
             "pq_enabled": bool(self.crypto.use_oqs),
             "kem_runtime": self.crypto.kem_name if self.crypto.use_oqs else "fallback-classical-kem",
             "signature_runtime": self.crypto.sig_name if self.crypto.use_oqs else "fallback-ed25519",
+            "oqs_reason": diag["oqs_reason"],
+            "oqs_module_name": diag["oqs_module_name"],
+            "oqs_module_file": diag["oqs_module_file"],
         }
 
     def _persist_identity(self):

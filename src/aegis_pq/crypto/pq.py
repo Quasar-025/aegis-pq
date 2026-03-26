@@ -34,8 +34,40 @@ class PQCryptoProvider:
     def __init__(self, kem_name: str = "Kyber1024", sig_name: str = "Dilithium5", use_oqs: bool = True):
         self.kem_name = kem_name
         self.sig_name = sig_name
-        oqs_ready = HAS_OQS and hasattr(OQS, "Signature") and hasattr(OQS, "KeyEncapsulation")
+        self.oqs_module_name = ""
+        self.oqs_module_file = ""
+        self.oqs_reason = ""
+
+        if HAS_OQS and OQS is not None:
+            self.oqs_module_name = getattr(OQS, "__name__", "")
+            self.oqs_module_file = getattr(OQS, "__file__", "")
+
+        has_signature = HAS_OQS and hasattr(OQS, "Signature")
+        has_kem = HAS_OQS and hasattr(OQS, "KeyEncapsulation")
+        oqs_ready = HAS_OQS and has_signature and has_kem
+
+        if not use_oqs:
+            self.oqs_reason = "oqs-disabled-by-config"
+        elif not HAS_OQS:
+            self.oqs_reason = "oqs-import-failed"
+        elif not has_signature or not has_kem:
+            self.oqs_reason = "wrong-oqs-package-or-incomplete-api"
+        else:
+            self.oqs_reason = "ok"
+
         self.use_oqs = use_oqs and oqs_ready
+
+    def diagnostics(self) -> dict[str, str | bool]:
+        return {
+            "pq_enabled": self.use_oqs,
+            "oqs_reason": self.oqs_reason,
+            "oqs_module_name": self.oqs_module_name,
+            "oqs_module_file": self.oqs_module_file,
+            "has_signature_api": bool(HAS_OQS and hasattr(OQS, "Signature")),
+            "has_kem_api": bool(HAS_OQS and hasattr(OQS, "KeyEncapsulation")),
+            "kem": self.kem_name,
+            "signature": self.sig_name,
+        }
 
     def generate_signature_keypair(self) -> SignatureKeyPair:
         if self.use_oqs:

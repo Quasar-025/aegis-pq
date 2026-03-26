@@ -1,5 +1,5 @@
 cryptography>=42.0.0
-oqs>=0.9.0
+liboqs-python>=0.14.1
 aioquic>=1.2.0
 protobuf>=5.0.0
 grpcio-tools>=1.66.0

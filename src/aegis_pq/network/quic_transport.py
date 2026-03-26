@@ -72,13 +72,13 @@ class RelayQuicClientProtocol(QuicConnectionProtocol):
         self._buffers: dict[int, bytearray] = {}
         self._waiters: dict[int, asyncio.Future[bytes]] = {}
 
-    async def request(self, payload: bytes) -> bytes:
+    async def request(self, payload: bytes, timeout: float = 8.0) -> bytes:
         stream_id = self._quic.get_next_available_stream_id()
         fut: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
         self._waiters[stream_id] = fut
         self._quic.send_stream_data(stream_id, payload, end_stream=True)
         self.transmit()
-        return await fut
+        return await asyncio.wait_for(fut, timeout=timeout)
 
     def quic_event_received(self, event: QuicEvent):
         if isinstance(event, StreamDataReceived):
@@ -126,7 +126,7 @@ class QuicRelayClient:
         self.port = port
         self._lock = asyncio.Lock()
 
-    async def request(self, payload: bytes) -> bytes:
+    async def request(self, payload: bytes, timeout: float = 8.0) -> bytes:
         async with self._lock:
             config = QuicConfiguration(is_client=True, alpn_protocols=["aegis-pq-relay"])
             config.verify_mode = ssl.CERT_NONE
@@ -136,4 +136,4 @@ class QuicRelayClient:
                 configuration=config,
                 create_protocol=RelayQuicClientProtocol,
             ) as client:
-                return await client.request(payload)
+                return await client.request(payload, timeout=timeout)
