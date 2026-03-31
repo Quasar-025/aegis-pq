@@ -67,3 +67,4 @@ test-keystore/
 *.tmp
 *.bak
 
+performance_metrics.json
