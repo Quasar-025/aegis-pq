@@ -95,6 +95,11 @@ class AegisClient:
         self.peer_sig_keys: dict[str, bytes] = {}
         self.handshake_audit: dict[str, dict] = {}
 
+    def _prefer_incoming_handshake(self, sender_id: str) -> bool:
+        # Deterministic tie-break for simultaneous initiation: the lexicographically
+        # smaller user_id is the canonical initiator for the active session.
+        return sender_id < self.user_id
+
     def _loaded_identity_compatible(self, loaded: dict) -> bool:
         stored_pq = loaded.get("pq_enabled")
         stored_sig_alg = loaded.get("sig_alg")
@@ -356,6 +361,9 @@ class AegisClient:
                     sender_signature=h.sender_signature,
                     one_time_prekey_id=h.one_time_prekey_id,
                 )
+                if init.sender_id in self.sessions and not self._prefer_incoming_handshake(init.sender_id):
+                    events.append({"type": "handshake-ignored", "from": init.sender_id, "reason": "simultaneous-init-tie-break"})
+                    continue
                 one_time_priv = None
                 if init.one_time_prekey_id:
                     otpk = self.one_time_prekeys.pop(init.one_time_prekey_id, None)
@@ -390,7 +398,11 @@ class AegisClient:
                 if peer not in self.sessions or peer not in self.peer_sig_keys:
                     events.append({"type": "error", "reason": "unknown-session", "from": peer})
                     continue
-                plaintext = self.ratchet.decrypt(self.sessions[peer], self.peer_sig_keys[peer], packet)
+                try:
+                    plaintext = self.ratchet.decrypt(self.sessions[peer], self.peer_sig_keys[peer], packet)
+                except Exception:
+                    events.append({"type": "error", "reason": "ratchet-decrypt-failed", "from": peer})
+                    continue
                 if plaintext.startswith(b"FILEPB::"):
                     pointer = pb.FilePointer()
                     pointer.ParseFromString(plaintext[8:])
