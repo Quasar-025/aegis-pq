@@ -151,8 +151,8 @@ pip install -e .
 macOS/Linux:
 ```bash
 cd aegis-pq
-python3 -m venv venv
-source venv/bin/activate
+python3.11 -m venv aegis-env
+source aegis-env/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .

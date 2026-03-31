@@ -23,7 +23,7 @@ class ClientApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Aegis-PQ Client")
-        self.geometry("1100x760")
+        self.geometry("1200x760")
         ctk.set_appearance_mode("dark")
 
         self.loop = asyncio.new_event_loop()
@@ -41,74 +41,150 @@ class ClientApp(ctk.CTk):
         self.last_initiate_error: str | None = None
         self._append_count = 0
 
-        self.header = ctk.CTkLabel(self, text="Aegis-PQ Real Client Mode", font=("Segoe UI", 24, "bold"))
-        self.header.pack(padx=20, pady=(18, 6))
+        # Main container
+        self.container = ctk.CTkFrame(self)
+        self.container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.cfg = ctk.CTkFrame(self)
-        self.cfg.pack(fill="x", padx=20, pady=8)
+        # Header
+        self.header_frame = ctk.CTkFrame(self.container)
+        self.header_frame.pack(fill="x", padx=5, pady=5)
+        
+        self.header = ctk.CTkLabel(self.header_frame, text="Aegis-PQ Real Client Mode", font=("Segoe UI", 24, "bold"))
+        self.header.pack(side="left", padx=10, pady=10)
 
-        self.user_entry = ctk.CTkEntry(self.cfg, width=130, placeholder_text="user_id (alice)")
-        self.user_entry.insert(0, "alice")
-        self.user_entry.pack(side="left", padx=6, pady=8)
+        self.theme_switch = ctk.CTkSwitch(self.header_frame, text="Light/Dark", command=self.toggle_theme)
+        self.theme_switch.pack(side="right", padx=10, pady=10)
 
-        self.peer_entry = ctk.CTkEntry(self.cfg, width=130, placeholder_text="peer_id (bob)")
-        self.peer_entry.insert(0, "bob")
-        self.peer_entry.pack(side="left", padx=6, pady=8)
+        # Config frame
+        self.cfg_frame = ctk.CTkFrame(self.container)
+        self.cfg_frame.pack(fill="x", padx=5, pady=5)
 
-        self.host_entry = ctk.CTkEntry(self.cfg, width=200, placeholder_text="relay_host")
-        self.host_entry.insert(0, "127.0.0.1")
-        self.host_entry.pack(side="left", padx=6, pady=8)
+        self.create_config_widgets(self.cfg_frame)
 
-        self.quic_port_entry = ctk.CTkEntry(self.cfg, width=90, placeholder_text="quic")
-        self.quic_port_entry.insert(0, "8889")
-        self.quic_port_entry.pack(side="left", padx=6, pady=8)
+        # Main content frame
+        self.main_content_frame = ctk.CTkFrame(self.container)
+        self.main_content_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.main_content_frame.grid_columnconfigure(0, weight=1)
+        self.main_content_frame.grid_columnconfigure(1, weight=1)
+        self.main_content_frame.grid_rowconfigure(0, weight=1)
 
-        self.tcp_port_entry = ctk.CTkEntry(self.cfg, width=90, placeholder_text="tcp")
-        self.tcp_port_entry.insert(0, "8888")
-        self.tcp_port_entry.pack(side="left", padx=6, pady=8)
+        # System logs
+        self.logs_frame = ctk.CTkFrame(self.main_content_frame)
+        self.logs_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.logs_frame.grid_columnconfigure(0, weight=1)
+        self.logs_frame.grid_rowconfigure(1, weight=1)
+        
+        self.logs_label = ctk.CTkLabel(self.logs_frame, text="SYSTEM LOGS & STATUS", font=("Segoe UI", 14, "bold"))
+        self.logs_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        
+        self.chat = ctk.CTkTextbox(self.logs_frame, width=450)
+        self.chat.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-        self.token_entry = ctk.CTkEntry(self.cfg, width=220, placeholder_text="auth_token")
-        self.token_entry.insert(0, DEFAULT_CONFIG.relay.auth_token)
-        self.token_entry.pack(side="left", padx=6, pady=8)
+        # Messages
+        self.messages_frame = ctk.CTkFrame(self.main_content_frame)
+        self.messages_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.messages_frame.grid_columnconfigure(0, weight=1)
+        self.messages_frame.grid_rowconfigure(1, weight=1)
 
-        self.transport_menu = ctk.CTkOptionMenu(self.cfg, values=["quic", "tcp"])
-        self.transport_menu.set("quic")
-        self.transport_menu.pack(side="left", padx=6, pady=8)
+        self.messages_label = ctk.CTkLabel(self.messages_frame, text="MESSAGES", font=("Segoe UI", 14, "bold"))
+        self.messages_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
 
-        self.connect_button = ctk.CTkButton(self.cfg, text="Connect", command=self.connect_client)
-        self.connect_button.pack(side="left", padx=6, pady=8)
+        self.messages_display = ctk.CTkTextbox(self.messages_frame, width=450)
+        self.messages_display.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
-        self.help = ctk.CTkLabel(
-            self,
-            justify="left",
-            anchor="w",
-            text=(
-                "Fill fields: user_id=this laptop user (alice/bob), peer_id=other user, relay_host=relay laptop IP, "
-                "quic=8889, tcp=8888, auth_token=same token used to start relay, transport=quic (or tcp fallback)."
-            ),
-            font=("Segoe UI", 12),
-        )
-        self.help.pack(fill="x", padx=24, pady=(0, 6))
+        # Message input
+        self.input_frame = ctk.CTkFrame(self.messages_frame)
+        self.input_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
+        self.input_frame.grid_columnconfigure(0, weight=1)
 
-        self.chat = ctk.CTkTextbox(self, width=1040, height=440)
-        self.chat.pack(padx=20, pady=12)
+        self.message_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Type a message... (Press Enter to Send)")
+        self.message_entry.grid(row=0, column=0, sticky="ew", padx=(10,5), pady=10)
+        self.message_entry.bind("<Return>", self.send_message)
 
-        self.row = ctk.CTkFrame(self)
-        self.row.pack(fill="x", padx=20, pady=10)
+        self.send_button = ctk.CTkButton(self.input_frame, text="Send", command=self.send_message)
+        self.send_button.grid(row=0, column=1, padx=5, pady=10)
 
-        self.message_entry = ctk.CTkEntry(self.row, width=700, placeholder_text="Type secure message")
-        self.message_entry.pack(side="left", padx=8, pady=8)
+        self.file_button = ctk.CTkButton(self.input_frame, text="Send File", command=self.send_file)
+        self.file_button.grid(row=0, column=2, padx=5, pady=10)
 
-        self.send_button = ctk.CTkButton(self.row, text="Send", command=self.send_message)
-        self.send_button.pack(side="left", padx=8, pady=8)
-
-        self.file_button = ctk.CTkButton(self.row, text="Send File", command=self.send_file)
-        self.file_button.pack(side="left", padx=8, pady=8)
-
-        self.poll_button = ctk.CTkButton(self.row, text="Poll", command=self.poll_once)
-        self.poll_button.pack(side="left", padx=8, pady=8)
+        self.poll_button = ctk.CTkButton(self.input_frame, text="Poll", command=self.poll_once)
+        self.poll_button.grid(row=0, column=3, padx=(5,10), pady=10)
 
         self.after(2000, self._poll_tick)
+
+    def create_config_widgets(self, parent):
+        # Your ID
+        self.user_id_frame = ctk.CTkFrame(parent)
+        self.user_id_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.user_id_label = ctk.CTkLabel(self.user_id_frame, text="Your ID")
+        self.user_id_label.pack(padx=5, pady=2, anchor="w")
+        self.user_entry = ctk.CTkEntry(self.user_id_frame, placeholder_text="user_id (alice)")
+        self.user_entry.insert(0, "alice")
+        self.user_entry.pack(padx=5, pady=2, fill="x")
+
+        # Peer ID
+        self.peer_id_frame = ctk.CTkFrame(parent)
+        self.peer_id_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.peer_id_label = ctk.CTkLabel(self.peer_id_frame, text="Peer ID")
+        self.peer_id_label.pack(padx=5, pady=2, anchor="w")
+        self.peer_entry = ctk.CTkEntry(self.peer_id_frame, placeholder_text="peer_id (bob)")
+        self.peer_entry.insert(0, "bob")
+        self.peer_entry.pack(padx=5, pady=2, fill="x")
+
+        # Relay IP
+        self.relay_ip_frame = ctk.CTkFrame(parent)
+        self.relay_ip_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.relay_ip_label = ctk.CTkLabel(self.relay_ip_frame, text="Relay IP")
+        self.relay_ip_label.pack(padx=5, pady=2, anchor="w")
+        self.host_entry = ctk.CTkEntry(self.relay_ip_frame, placeholder_text="relay_host")
+        self.host_entry.insert(0, "127.0.0.1")
+        self.host_entry.pack(padx=5, pady=2, fill="x")
+
+        # QUIC Port
+        self.quic_port_frame = ctk.CTkFrame(parent)
+        self.quic_port_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.quic_port_label = ctk.CTkLabel(self.quic_port_frame, text="QUIC Port")
+        self.quic_port_label.pack(padx=5, pady=2, anchor="w")
+        self.quic_port_entry = ctk.CTkEntry(self.quic_port_frame, placeholder_text="quic")
+        self.quic_port_entry.insert(0, "8889")
+        self.quic_port_entry.pack(padx=5, pady=2, fill="x")
+
+        # TCP Port
+        self.tcp_port_frame = ctk.CTkFrame(parent)
+        self.tcp_port_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.tcp_port_label = ctk.CTkLabel(self.tcp_port_frame, text="TCP Port")
+        self.tcp_port_label.pack(padx=5, pady=2, anchor="w")
+        self.tcp_port_entry = ctk.CTkEntry(self.tcp_port_frame, placeholder_text="tcp")
+        self.tcp_port_entry.insert(0, "8888")
+        self.tcp_port_entry.pack(padx=5, pady=2, fill="x")
+
+        # Auth Token
+        self.auth_token_frame = ctk.CTkFrame(parent)
+        self.auth_token_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.auth_token_label = ctk.CTkLabel(self.auth_token_frame, text="Auth Token")
+        self.auth_token_label.pack(padx=5, pady=2, anchor="w")
+        self.token_entry = ctk.CTkEntry(self.auth_token_frame, placeholder_text="auth_token")
+        self.token_entry.insert(0, DEFAULT_CONFIG.relay.auth_token)
+        self.token_entry.pack(padx=5, pady=2, fill="x")
+
+        # Transport
+        self.transport_frame = ctk.CTkFrame(parent)
+        self.transport_frame.pack(side="left", padx=5, pady=5, fill="x", expand=True)
+        self.transport_label = ctk.CTkLabel(self.transport_frame, text="Transport")
+        self.transport_label.pack(padx=5, pady=2, anchor="w")
+        self.transport_menu = ctk.CTkOptionMenu(self.transport_frame, values=["quic", "tcp"])
+        self.transport_menu.set("quic")
+        self.transport_menu.pack(padx=5, pady=2, fill="x")
+
+        # Connect Button
+        self.connect_button = ctk.CTkButton(parent, text="Connect", command=self.connect_client)
+        self.connect_button.pack(side="left", padx=10, pady=10, fill="x")
+
+    def toggle_theme(self):
+        if self.theme_switch.get() == 1:
+            ctk.set_appearance_mode("light")
+        else:
+            ctk.set_appearance_mode("dark")
 
     def _run_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -229,18 +305,20 @@ class ClientApp(ctk.CTk):
         for ev in events:
             if ev.get("type") == "text":
                 self._append(f"recv text from {ev['from']}: {ev['text']}")
+                self.messages_display.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {ev['from']}: {ev['text']}\n")
             elif ev.get("type") == "file":
                 out = Path("received")
                 out.mkdir(parents=True, exist_ok=True)
                 path = out / ev["filename"]
                 path.write_bytes(ev["content"])
                 self._append(f"recv file from {ev['from']}: {path}")
+                self.messages_display.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {ev['from']}: received file {path}\n")
             elif ev.get("type") == "handshake":
                 self._append(f"[session] handshake from {ev['from']}")
             else:
                 self._append(f"event: {ev}")
 
-    def send_message(self):
+    def send_message(self, event=None):
         if not self.client or not self.peer_id:
             return
         text = self.message_entry.get().strip()
@@ -250,6 +328,7 @@ class ClientApp(ctk.CTk):
 
         def _ok(_):
             self._append(f"sent to {self.peer_id}: {text}")
+            self.messages_display.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] you: {text}\n")
             self.message_entry.delete(0, "end")
             self.send_button.configure(state="normal")
 
